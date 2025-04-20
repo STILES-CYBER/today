@@ -1,8 +1,15 @@
+CC = gcc
+CFLAGS = -Wall -Werror
+TARGET = writer
+SRC = writer.c
 
 .PHONY: all clean
 
-all: writer.sh
-	chmod +x writer.sh
+all: $(TARGET)
+
+$(TARGET): $(SRC)
+	$(CC) $(CFLAGS) -o $(TARGET) $(SRC)
 
 clean:
-	rm -f *.log
+	rm -f $(TARGET)
+
