@@ -1,107 +1,101 @@
 #!/bin/bash
-# Script outline to install and build kernel.
-# Author: Siddhant Jajoo. Updated by OpenAI.
+# Script to build and install a minimal Linux system for ARM64 using QEMU
+# Author: Siddhant Jajoo (modified)
 
-set -e
-set -u
+set -e  # Exit on any error
+set -u  # Treat unset variables as errors
 
+# Defaults
 OUTDIR=/tmp/aeld
-KERNEL_REPO=git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
+KERNEL_REPO=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
 KERNEL_VERSION=v5.15.163
 BUSYBOX_VERSION=1_33_1
-FINDER_APP_DIR=$(realpath $(dirname $0))
+FINDER_APP_DIR=$(realpath $(dirname "$0"))
 ARCH=arm64
-CROSS_COMPILE=aarch64-none-linux-gnu-
+CROSS_COMPILE=aarch64-linux-gnu-
 
-if [ $# -lt 1 ]
-then
-	echo "Using default directory ${OUTDIR} for output"
+# Parse command line arguments
+if [ $# -ge 1 ]; then
+    OUTDIR=$1
+    echo "Using passed directory ${OUTDIR} for output"
 else
-	OUTDIR=$1
-	echo "Using passed directory ${OUTDIR} for output"
+    echo "Using default directory ${OUTDIR} for output"
 fi
 
-mkdir -p ${OUTDIR}
+# Ensure OUTDIR exists
+mkdir -p "${OUTDIR}" || { echo "Failed to create ${OUTDIR}"; exit 1; }
 
 cd "$OUTDIR"
+
+# Clone and build the kernel
 if [ ! -d "${OUTDIR}/linux-stable" ]; then
-	echo "CLONING GIT LINUX STABLE VERSION ${KERNEL_VERSION} IN ${OUTDIR}"
-	git clone ${KERNEL_REPO} --depth 1 --single-branch --branch ${KERNEL_VERSION}
+    echo "Cloning Linux kernel ${KERNEL_VERSION}"
+    git clone --depth 1 --branch ${KERNEL_VERSION} ${KERNEL_REPO} linux-stable || { echo "Kernel clone failed"; exit 1; }
 fi
 
-if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
+if [ ! -e "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" ]; then
+    echo "Building the Linux kernel"
     cd linux-stable
-    echo "Checking out version ${KERNEL_VERSION}"
-    git checkout ${KERNEL_VERSION}
-
-    echo "Building kernel..."
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig
-    make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} all
-    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} modules
-    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} dtbs
+    make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} all || { echo "Kernel build failed"; exit 1; }
+    cd ..
 fi
 
-echo "Adding the Image in outdir"
-cp ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ${OUTDIR}/
+echo "Copying kernel image to ${OUTDIR}"
+cp "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" "${OUTDIR}/Image" || { echo "Failed to copy kernel image"; exit 1; }
 
-echo "Creating the staging directory for the root filesystem"
+# Rootfs setup
+echo "Creating root filesystem"
 cd "$OUTDIR"
-if [ -d "${OUTDIR}/rootfs" ]; then
-	echo "Deleting rootfs directory at ${OUTDIR}/rootfs and starting over"
-    sudo rm -rf ${OUTDIR}/rootfs
-fi
+sudo rm -rf rootfs
+mkdir -p rootfs/{bin,sbin,etc,proc,sys,usr/{bin,sbin},lib,lib64,dev,home,tmp}
 
-mkdir -p rootfs/{bin,dev,etc,home,lib,lib64,proc,sbin,sys,tmp,usr,var}
-mkdir -p rootfs/usr/{bin,sbin}
-mkdir -p rootfs/var/log
-
-cd "$OUTDIR"
+# Build and install BusyBox
 if [ ! -d "${OUTDIR}/busybox" ]; then
-	git clone git://busybox.net/busybox.git
-	cd busybox
-	git checkout ${BUSYBOX_VERSION}
-else
-	cd busybox
+    echo "Cloning BusyBox repository"
+    git clone git://busybox.net/busybox.git || { echo "BusyBox clone failed"; exit 1; }
 fi
-
-echo "Configuring and installing busybox..."
+cd busybox
+git checkout ${BUSYBOX_VERSION}
 make distclean
 make defconfig
-make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
-make CONFIG_PREFIX=${OUTDIR}/rootfs ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} install
+make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} || { echo "BusyBox build failed"; exit 1; }
+make CONFIG_PREFIX="${OUTDIR}/rootfs" ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} install || { echo "BusyBox install failed"; exit 1; }
 
-echo "Library dependencies"
-cd ${OUTDIR}/rootfs
+# Library dependencies
+cd "${OUTDIR}/rootfs"
 SYSROOT=$(${CROSS_COMPILE}gcc -print-sysroot)
+cp -a ${SYSROOT}/lib/* ./lib/ || echo "No libraries found in lib"
+cp -a ${SYSROOT}/lib64/* ./lib64/ || echo "No libraries found in lib64"
 
-cp -a ${SYSROOT}/lib/ld-linux-aarch64.so.1 lib/
-cp -a ${SYSROOT}/lib64/libc.so.6 lib64/
-cp -a ${SYSROOT}/lib64/libm.so.6 lib64/
-cp -a ${SYSROOT}/lib64/libresolv.so.2 lib64/
-cp -a ${SYSROOT}/lib64/ld-linux-aarch64.so.1 lib64/
-
+# Create device nodes
 echo "Creating device nodes"
-sudo mknod -m 666 dev/null c 1 3
-sudo mknod -m 600 dev/console c 5 1
+sudo mknod -m 666 dev/null c 1 3 || { echo "Failed to create /dev/null"; exit 1; }
+sudo mknod -m 600 dev/console c 5 1 || { echo "Failed to create /dev/console"; exit 1; }
 
-echo "Building writer utility"
-cd ${FINDER_APP_DIR}
+# Build writer app
+echo "Building writer application"
+cd "${FINDER_APP_DIR}"
 make clean
-make CROSS_COMPILE=${CROSS_COMPILE}
+make CROSS_COMPILE=${CROSS_COMPILE} || { echo "Writer app build failed"; exit 1; }
 
-echo "Copying finder scripts and executables to rootfs"
-cp writer ${OUTDIR}/rootfs/home/
-cp finder.sh finder-test.sh conf/username.txt conf/assignment.txt ${OUTDIR}/rootfs/home/
-sed -i 's|\.\./conf/assignment.txt|conf/assignment.txt|' ${OUTDIR}/rootfs/home/finder-test.sh
-cp autorun-qemu.sh ${OUTDIR}/rootfs/home/
+# Copy apps and scripts to rootfs
+echo "Copying applications and scripts to root filesystem"
+mkdir -p "${OUTDIR}/rootfs/home"
+cp writer finder.sh finder-test.sh conf/username.txt conf/assignment.txt autorun-qemu.sh "${OUTDIR}/rootfs/home/" || { echo "Failed to copy files to rootfs"; exit 1; }
 
-echo "Changing ownership to root"
-cd ${OUTDIR}/rootfs
-sudo chown -R root:root *
+# Fix finder-test.sh relative path
+sed -i 's|\.\./conf/|conf/|g' "${OUTDIR}/rootfs/home/finder-test.sh"
 
+# Set permissions
+echo "Setting permissions for root filesystem"
+cd "${OUTDIR}/rootfs"
+sudo chown -R root:root . || { echo "Failed to set permissions"; exit 1; }
+
+# Create initramfs
 echo "Creating initramfs"
-find . | cpio -H newc -ov --owner root:root > ${OUTDIR}/initramfs.cpio
-gzip -f ${OUTDIR}/initramfs.cpio
+find . | cpio -H newc -ov --owner root:root | gzip > "${OUTDIR}/initramfs.cpio.gz" || { echo "Failed to create initramfs"; exit 1; }
 
-echo "Kernel and initramfs build complete in ${OUTDIR}"
+echo "Build completed: ${OUTDIR}/Image and ${OUTDIR}/initramfs.cpio.gz are ready."
+
