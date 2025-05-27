@@ -1,6 +1,6 @@
 #!/bin/bash
 # Script to build kernel and rootfs for QEMU ARM64
-# Author: Siddhant Jajoo. Enhanced by Copilot for automation and error suppression.
+# Author: Siddhant Jajoo. 
 
 set -e
 set -u
