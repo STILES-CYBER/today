@@ -111,6 +111,7 @@ make CROSS_COMPILE=${CROSS_COMPILE}
 # Copy the finder related scripts and executables to the /home directory on the target rootfs
 cp writer "${OUTDIR}/rootfs/home/"
 cp finder.sh "${OUTDIR}/rootfs/home/"
+cp writer.sh "${OUTDIR}/rootfs/home/"
 cp finder-test.sh "${OUTDIR}/rootfs/home/"
 cp autorun-qemu.sh "${OUTDIR}/rootfs/home/"
 mkdir -p "${OUTDIR}/rootfs/home/conf"
@@ -118,6 +119,9 @@ cp conf/username.txt "${OUTDIR}/rootfs/home/conf/"
 cp conf/assignment.txt "${OUTDIR}/rootfs/home/conf/"
 # Fix path in finder-test.sh
 sed -i 's|\.\./conf/assignment.txt|conf/assignment.txt|' "${OUTDIR}/rootfs/home/finder-test.sh"
+
+chmod +x "${OUTDIR}/rootfs/home/writer"
+chmod +x "${OUTDIR}/rootfs/home/"*.sh
 
 # Chown the root directory
 cd "${OUTDIR}/rootfs"
@@ -129,3 +133,15 @@ find . 2>/dev/null | cpio -H newc -ov --owner root:root | gzip > "${OUTDIR}/init
 echo "Kernel and rootfs images are ready:"
 echo "  Kernel: ${OUTDIR}/Image"
 echo "  Initramfs: ${OUTDIR}/initramfs.cpio.gz"
+
+mkdir -p /tmp/aesd-autograder
+
+# Only copy if source and destination are not the same file
+if [ "${OUTDIR}/Image" != "/tmp/aesd-autograder/Image" ]; then
+    cp "${OUTDIR}/Image" /tmp/aesd-autograder/Image
+fi
+if [ "${OUTDIR}/initramfs.cpio.gz" != "/tmp/aesd-autograder/initramfs.cpio.gz" ]; then
+    cp "${OUTDIR}/initramfs.cpio.gz" /tmp/aesd-autograder/initramfs.cpio.gz
+fi
+
+exit 0
