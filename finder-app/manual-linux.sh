@@ -5,6 +5,9 @@
 set -e
 set -u
 
+git config --global http.postBuffer 524288000
+git config --global core.compression 0
+
 OUTDIR=/tmp/aeld
 KERNEL_REPO=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
 KERNEL_VERSION=v5.15.163
@@ -25,10 +28,18 @@ mkdir -p "${OUTDIR}" || { echo "Failed to create outdir ${OUTDIR}"; exit 1; }
 
 cd "$OUTDIR"
 if [ ! -d "${OUTDIR}/linux-stable" ]; then
-    # Clone only if the repository does not exist.
     echo "CLONING GIT LINUX STABLE VERSION ${KERNEL_VERSION} IN ${OUTDIR}"
-    git clone ${KERNEL_REPO} --depth 1 --single-branch --branch ${KERNEL_VERSION} linux-stable
+    for i in {1..3}; do
+        git clone ${KERNEL_REPO} --depth 1 --single-branch --branch ${KERNEL_VERSION} linux-stable && break
+        echo "Clone failed, retrying in 10 seconds... ($i/3)"
+        sleep 10
+    done
+    if [ ! -d "${OUTDIR}/linux-stable" ]; then
+        echo "Failed to clone linux-stable after 3 attempts."
+        exit 1
+    fi
 fi
+
 
 if [ ! -e "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" ]; then
     cd linux-stable
