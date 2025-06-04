@@ -14,7 +14,7 @@ KERNEL_VERSION=v5.15.163
 BUSYBOX_VERSION=1_33_1
 FINDER_APP_DIR=$(realpath $(dirname $0))
 ARCH=arm64
-CROSS_COMPILE=aarch64-linux-gnu-
+CROSS_COMPILE=aarch64-none-linux-gnu-
 
 if [ $# -lt 1 ]
 then
@@ -30,6 +30,7 @@ cd "$OUTDIR"
 if [ ! -d "${OUTDIR}/linux-stable" ]; then
     echo "CLONING GIT LINUX STABLE VERSION ${KERNEL_VERSION} IN ${OUTDIR}"
     for i in {1..3}; do
+        rm -rf linux-stable
         git clone ${KERNEL_REPO} --depth 1 --single-branch --branch ${KERNEL_VERSION} linux-stable && break
         echo "Clone failed, retrying in 10 seconds... ($i/3)"
         sleep 10
@@ -40,7 +41,6 @@ if [ ! -d "${OUTDIR}/linux-stable" ]; then
     fi
 fi
 
-
 if [ ! -e "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" ]; then
     cd linux-stable
     echo "Checking out version ${KERNEL_VERSION}"
@@ -50,10 +50,17 @@ if [ ! -e "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" ]; then
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig
     make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} all
-    # Copy kernel image to outdir
-    cp arch/${ARCH}/boot/Image ${OUTDIR}/
     cd "$OUTDIR"
 fi
+
+# Fail fast if image is missing
+if [ ! -e "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" ]; then
+    echo "Kernel build failed: Image not found at ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image"
+    exit 1
+fi
+
+# Copy kernel image to outdir
+cp "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" "${OUTDIR}/"
 
 echo "Adding the Image in outdir"
 
